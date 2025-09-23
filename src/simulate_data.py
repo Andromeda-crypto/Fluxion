@@ -221,15 +221,11 @@ class PitchSimulator:
 # ps = PitchSimulator()
 # df_flow = ps.simulate_gameflow(num_events=200)
 # print(df_flow.head())
-
-    
-if __name__ == '__main__':
-    df_simple = simulate_data(200)
-    #print(df_simple)
+if __name__ == "__main__":
     ps = PitchSimulator()
     df_flow = ps.simulate_gameflow(num_events=200)
-    print(df_flow.head)
-        
+    print(df_flow)
+
 
 
 
