@@ -126,7 +126,7 @@ class PitchSimulator:
 
             start_x, start_y = current_position
 
-            # generate end position based on event and team
+            # generate end position depending on event and team
             new_x, new_y = self.generate_position(current_team, event, start_pos=current_position)
 
             # if shot: calculate goal chance (closer => larger chance)
