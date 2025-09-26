@@ -43,6 +43,20 @@ class PitchSimulator:
         self.y_min = -width / 2
         self.y_max = width / 2
 
+        # initialize stats
+        self.stats = {
+            "team0_goals": 0,
+            "team1_goals": 0,
+            "team0_shots": 0,
+            "team1_shots": 0,
+            "team0_passes": 0,
+            "team1_passes": 0,
+            "team0_turnovers": 0,
+            "team1_turnovers": 0,
+            "team0_possession": 0,
+            "team1_possession": 0,
+        }
+
     def clamp_position(self, x, y):
         """Keep x,y inside pitch bounds."""
         x = max(self.x_min, min(self.x_max, x))
@@ -124,7 +138,9 @@ class PitchSimulator:
     def simulate_gameflow(self, num_events=100, goal_base_prob=0.2):
         """
         Simulate a chaotic football gameflow with dynamic probabilities.
-        Returns a pandas DataFrame of logged events.
+        Returns:
+          - DataFrame of logged events
+          - Dictionary of match stats
         """
         match_log = []
         current_team = "team0"
@@ -140,6 +156,12 @@ class PitchSimulator:
         time += 1
 
         for i in range(num_events):
+            # Track possession
+            if current_position[0] < 0:
+                self.stats["team0_possession"] += 1
+            else:
+                self.stats["team1_possession"] += 1
+
             # Adjusted probabilities
             probs = self.adjust_event_probabilities(last_event, current_position, current_team)
             event = np.random.choice(list(probs.keys()), p=list(probs.values()))
@@ -148,6 +170,9 @@ class PitchSimulator:
             new_x, new_y = self.generate_position(current_team, event, start_pos=current_position)
 
             if event == "shot":
+                # Track shot
+                self.stats[f"{current_team}_shots"] += 1
+
                 # Distance to goal affects chance of scoring
                 if current_team == "team0":
                     dist = abs(self.x_max - start_x)
@@ -156,6 +181,8 @@ class PitchSimulator:
                 adjusted_prob = goal_base_prob * (1 / (1 + dist / 20.0))
 
                 if np.random.rand() < adjusted_prob:
+                    # Goal!
+                    self.stats[f"{current_team}_goals"] += 1
                     step = build_event(time, current_team, "goal", current_position, (new_x, new_y))
                     match_log.append(step)
                     # Reset play
@@ -171,9 +198,13 @@ class PitchSimulator:
                     continue
                 else:
                     step_event = "shot"
+
             elif event == "turnover":
+                self.stats[f"{current_team}_turnovers"] += 1
                 step_event = "turnover"
+
             else:
+                self.stats[f"{current_team}_passes"] += 1
                 step_event = "pass"
 
             # Append event
@@ -190,13 +221,18 @@ class PitchSimulator:
             last_event = step_event
             time += 1
 
-        return pd.DataFrame(match_log, columns=columns)
+        return pd.DataFrame(match_log, columns=columns), self.stats
 
 
 if __name__ == "__main__":
     ps = PitchSimulator()
-    df_flow = ps.simulate_gameflow(num_events=200)
+    df_flow, stats = ps.simulate_gameflow(num_events=200)
     print(df_flow.head(20))
+    print("\n=== FINAL SCOREBOARD ===")
+    print(f"Team 0: {stats['team0_goals']} | Team 1: {stats['team1_goals']}")
+    print("\n=== MATCH STATS ===")
+    for k, v in stats.items():
+        print(f"{k}: {v}")
 
 
 

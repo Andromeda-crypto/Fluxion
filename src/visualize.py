@@ -1,32 +1,32 @@
-''' 
-takes the dataframe from simulate.py and plots it to make 
-it easier to visualize and tweak as we go on forward
-'''
+"""
+visualize.py
+Visualizes simulated football-like event data from simulate.py
+and shows a scoreboard + statsheet.
+"""
 
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from simulate_data import PitchSimulator
 
 
-def draw_pitch(ax, length=100, width= 50):
-    ax.set_xlim(-length/2,length/2)
+def draw_pitch(ax, length=100, width=50):
+    """Draws a simple pitch centered at origin."""
+    ax.set_xlim(-length/2, length/2)
     ax.set_ylim(-width/2, width/2)
-    ax.axhline(0,color='k', linewidth=0.5)
-    ax.axvline(0,color='k', linewidth= 0.5)
+    ax.axhline(0, color='k', linewidth=0.5)
+    ax.axvline(0, color='k', linewidth=0.5)
 
-    ax.plot([length/2, length/2], [-7.32/2, 7.32/2], color='red', linewidth= 2)
-    ax.plot([-length/2, -length/2], [-7.32/2, 7/32/2], color='red', linewidth= 2)
+    # Goals as vertical lines at ends
+    ax.plot([length/2, length/2], [-7.32/2, 7.32/2], color='red', linewidth=2)
+    ax.plot([-length/2, -length/2], [-7.32/2, 7.32/2], color='red', linewidth=2)
 
 
 def animate_simulation(df):
-    """
-    Step by step simualtion of df
-    """
-    fig, ax = plt.subplots(figsize=(10,6))
+    """Step-by-step animation of events in DataFrame."""
+    fig, ax = plt.subplots(figsize=(10, 6))
     draw_pitch(ax)
 
-
-    # color coding specific events 
+    # event-specific colors
     event_colors = {
         "pass": "blue",
         "shot": "orange",
@@ -35,29 +35,37 @@ def animate_simulation(df):
         "kickoff_pass": "green"
     }
 
-    ball, = ax.plot([],[],'o', color='blue', markersize=8)  # moving ball
+    ball, = ax.plot([], [], 'o', color="blue", markersize=8)  # moving ball
+    arrows = []  # to hold event arrows
     title = ax.set_title("")
-
 
     def update(frame):
         row = df.iloc[frame]
         color = event_colors.get(row["event"], "gray")
-        ball.set_data([row("end_x")], [row("end_y")])
-        ball.set_color(color)
-        title.set_text(f"t={row['time']} | {row['team']} | {row['event']}")
 
-        return ball, title
-    
-    ani = animation.FuncAnimation(fig, update, frames = len(df), interval=500, blit=False, repeat=False)
+        # Update ball position
+        ball.set_data([row["end_x"]], [row["end_y"]])
+        ball.set_color(color)
+
+        # Draw an arrow for this event (start -> end)
+        arrow = ax.arrow(
+            row["start_x"], row["start_y"],
+            row["end_x"] - row["start_x"], row["end_y"] - row["start_y"],
+            head_width=1.5, head_length=2.5, fc=color, ec=color, alpha=0.6
+        )
+        arrows.append(arrow)
+
+        title.set_text(f"t={row['time']} | {row['team']} | {row['event']}")
+        return ball, arrow, title
+
+    ani = animation.FuncAnimation(fig, update, frames=len(df), interval=200, blit=False, repeat=False)
     plt.show()
 
 
 def plot_event_heatmap(df, length=100, width=50):
-    """
-    Static heatmap of event end positions
-    """
+    """Static heatmap of event end positions."""
     plt.figure(figsize=(10, 6))
-    plt.hexbin(df["end_x"], df["end_y"], gridsize=20, cmap="viridis", alpha=0.8)
+    plt.hexbin(df["end_x"], df["end_y"], gridsize=30, cmap="viridis", alpha=0.8)
     plt.colorbar(label="Event density")
     plt.title("Event End Position Heatmap")
     plt.xlim(-length/2, length/2)
@@ -65,11 +73,31 @@ def plot_event_heatmap(df, length=100, width=50):
     plt.show()
 
 
+def display_stats(stats):
+    """Prints scoreboard + statsheet nicely."""
+    print("\n=== SCOREBOARD ===")
+    print(f"Team0: {stats['team0']['goals']}  |  Team1: {stats['team1']['goals']}")
+
+    print("\n=== MATCH STATS ===")
+    for team, data in stats.items():
+        print(f"\n{team.upper()}:")
+        print(f"  Passes   : {data['passes']}")
+        print(f"  Shots    : {data['shots']}")
+        print(f"  Turnovers: {data['turnovers']}")
+        print(f"  Goals    : {data['goals']}")
+
+
 if __name__ == "__main__":
     ps = PitchSimulator()
-    df = ps.simulate_gameflow(num_events=200)
+    df, stats = ps.simulate_gameflow(num_events=200)
 
+    # Step-by-step replay
     animate_simulation(df)
 
+    # Aggregate view
     plot_event_heatmap(df)
-    
+
+    # Scoreboard + statsheet
+    display_stats(stats)
+
+
