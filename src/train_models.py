@@ -11,7 +11,7 @@ from sklearn.metrics import accuracy_score,  f1_score, classification_report
 
 from src.features import add_engineered_features
 
-def train_models(clean_file_path="../data/processed/cleaned_data.csv",model_dir="../models/"):
+def train_models(clean_file_path="../data/processed/cleaned_data.csv",model_dir="../models"):
     os.makedirs(model_dir, exist_ok=True)
     
     df = pd.read_csv(clean_file_path)

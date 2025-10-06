@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import entropy
 
-def add_engineered_features(df: pd.DataFrame) -> pd.Dataframe:
+def add_engineered_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     if "x_norm" not in df:
