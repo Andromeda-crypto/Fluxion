@@ -12,7 +12,7 @@ from sklearn.metrics import accuracy_score, f1_score, classification_report
 from src.features import add_engineered_features
 
 
-def train_models(clean_file_path=None, model_dir="../models"):
+def train_models(clean_file_path=None, model_dir="models"):
     ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     if clean_file_path is None:
         clean_file_path = os.path.join(ROOT, "data", "processed", "cleaned_data.csv")
