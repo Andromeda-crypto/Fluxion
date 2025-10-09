@@ -1,91 +1,70 @@
-import numpy as np
-import joblib
-from src.chaos_analysis import ChaosAnalyzer
-from src.utils import load_data, log_event
+import os
+import json
+from src.utils import load_json_safe, print_banner
+
 
 class AdaptiveController:
     """
-    Dynamically selects the best model based on chaos metrics and past performance.
+    Dynamically selects the most suitable model based on the current chaos score.
+    Uses chaos reference thresholds derived from prior chaos analysis.
     """
 
-    def __init__(self, model_paths, chaos_data_path, threshold=0.5):
-        """
-        Initialize the controller with multiple trained models and chaos analyzer.
-        """
-        self.models = {name: joblib.load(path) for name, path in model_paths.items()}
-        self.chaos_analyzer = ChaosAnalyzer(chaos_data_path)
-        self.threshold = threshold
-        self.performance_cache = {}  # stores adaptive history
+    def __init__(self, chaos_reference_path=None):
+        self.chaos_reference_path = chaos_reference_path
+        self.thresholds = self._load_reference()
+        print(f"✅ AdaptiveController initialized with thresholds: {self.thresholds}")
 
-    def evaluate_chaos(self, data):
-        """
-        Compute chaos metrics for the given input data.
-        Returns a dict of metrics: variance, noise, entropy, etc.
-        """
-        chaos_metrics = self.chaos_analyzer.analyze_data(data)
-        log_event("CHAOS_METRICS", chaos_metrics)
-        return chaos_metrics
+    # ------------------------------------------------
+    # Load chaos thresholds (from chaos_analysis.json)
+    # ------------------------------------------------
+    def _load_reference(self):
+        """Load chaos thresholds from the reference JSON file."""
+        if self.chaos_reference_path and os.path.exists(self.chaos_reference_path):
+            data = load_json_safe(self.chaos_reference_path)
 
-    def select_model(self, chaos_metrics):
-        """
-        Select model based on chaos level.
-        - Low chaos → simpler / faster models (RandomForest)
-        - High chaos → complex / robust models (XGBoost / Stacking)
-        """
-        variance = chaos_metrics.get('variance', 0)
-        noise = chaos_metrics.get('noise', 0)
+            # Handle both detailed chaos analysis or compact threshold dicts
+            if "chaos_thresholds" in data:
+                thresholds = data["chaos_thresholds"]
+            else:
+                # Derive thresholds heuristically if chaos_analysis.json came from analyzer output
+                thresholds = {"low": 0.3, "high": 0.7}
 
-        if variance < 0.3 and noise < 0.2:
-            chosen = "random_forest"
-        elif variance < 0.6:
-            chosen = "gradient_boosting"
+            print(f"✅ Loaded chaos thresholds from {self.chaos_reference_path}")
+            return thresholds
+
+        print("⚠️ No chaos reference found, using default thresholds.")
+        return {"low": 0.3, "high": 0.7}
+
+    # ------------------------------------------------
+    # Model selection based on current chaos score
+    # ------------------------------------------------
+    def select_model(self, chaos_score):
+        """
+        Select which model to use based on chaos score:
+        - Low chaos: stable → RandomForest
+        - Medium chaos: adaptive → GradientBoosting
+        - High chaos: highly nonlinear → XGBoost
+        """
+        low, high = self.thresholds["low"], self.thresholds["high"]
+
+        if chaos_score < low:
+            selected = "randomforest"
+        elif chaos_score < high:
+            selected = "gradientboosting"
         else:
-            chosen = "xgboost"
+            selected = "xgboost"
 
-        log_event("MODEL_SELECTED", {"model": chosen, "variance": variance, "noise": noise})
-        return chosen
+        print(f"⚙️ Chaos={chaos_score:.3f} → Selected model: {selected}")
+        return selected
 
-    def predict(self, data):
-        """
-        Full adaptive prediction pipeline:
-        1. Analyze chaos
-        2. Select model dynamically
-        3. Predict
-        4. Update internal logs
-        """
-        chaos_metrics = self.evaluate_chaos(data)
-        chosen_model_name = self.select_model(chaos_metrics)
-        chosen_model = self.models[chosen_model_name]
 
-        prediction = chosen_model.predict(data)
-        self.performance_cache[chosen_model_name] = self.performance_cache.get(chosen_model_name, []) + [prediction]
+# ---------------- DEMO EXECUTION ----------------
+if __name__ == "__main__":
+    print_banner("Adaptive Controller Demo")
 
-        log_event("PREDICTION", {
-            "model_used": chosen_model_name,
-            "chaos_level": chaos_metrics,
-            "prediction": prediction.tolist() if isinstance(prediction, np.ndarray) else prediction
-        })
+    # Demo run — mimicking incoming chaos values
+    controller = AdaptiveController(chaos_reference_path="results/chaos_analysis.json")
 
-        return prediction
-
-    def adaptive_update(self, data, true_values):
-        """
-        Optional adaptive feedback loop: update model weights or decision thresholds
-        based on error patterns and chaos metrics.
-        """
-        chaos_metrics = self.evaluate_chaos(data)
-        errors = {}
-        for name, model in self.models.items():
-            preds = model.predict(data)
-            mse = np.mean((preds - true_values) ** 2)
-            errors[name] = mse
-
-        # Lower error = better
-        best_model = min(errors, key=errors.get)
-        log_event("ADAPTIVE_UPDATE", {"best_model": best_model, "errors": errors})
-
-        # Adjust threshold dynamically
-        avg_error = np.mean(list(errors.values()))
-        self.threshold = max(0.1, min(1.0, avg_error))
-
-        return best_model, errors
+    demo_scores = [0.1, 0.25, 0.45, 0.75, 0.9]
+    for score in demo_scores:
+        controller.select_model(score)
