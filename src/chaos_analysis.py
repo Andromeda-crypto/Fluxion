@@ -1,105 +1,108 @@
 import numpy as np
-import joblib
-import os
 import pandas as pd
+import os
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
+from src.utils import save_json_safe, load_model_safe, get_project_root, ensure_dir, print_banner
 from src.features import add_engineered_features
 
 
+class ChaosAnalyzer:
+    """
+    Analyzes model robustness under chaotic or noisy data conditions.
+    Helps identify which models perform best in different environments.
+    """
 
-def perturb_inputs(X, noise_level=0.05):
-    X_peturbed = X.copy()
-    for col in X.columns:
-        if np.issubdtype(X[col].dtype, np.number):
-            noise = np.random.normal(0, noise_level, size=len(X))
-            X_peturbed[col] = X[col] * (1 + noise)
-    
-    return X_peturbed
+    def __init__(self, models_dir=None, results_path=None):
+        ROOT = get_project_root()
+        self.models_dir = models_dir or os.path.join(ROOT, "models")
+        self.results_path = results_path or os.path.join(ROOT, "results", "chaos_analysis.json")
+        ensure_dir(os.path.dirname(self.results_path))
+        self.models = self._load_all_models()
 
-def eval_chaos_stability(model, X, y, noise_levels=[0.01,0.05,0.1,0.2,0.5]):
-    base_prediction = model.predict(X)
-    results = []
-    for nl in noise_levels:
-        X_perturbed = perturb_inputs(X, noise_level = nl)
-        perturbed_preds = model.predict(X_perturbed)
+    def _load_all_models(self):
+        """Load all saved models from the models directory."""
+        models = {}
+        for file in os.listdir(self.models_dir):
+            if file.endswith(".joblib"):  # your models are saved as .joblib
+                name = file.replace(".joblib", "")
+                model = load_model_safe(os.path.join(self.models_dir, file))
+                if model:
+                    models[name] = model
+        print(f"✅ Loaded models for chaos analysis: {list(models.keys())}")
+        return models
 
-        change_rate = np.mean(base_prediction != perturbed_preds) * 100 # percent of prediction changed
-        noisy_acc = accuracy_score(y, perturbed_preds)
+    def inject_chaos(self, X, level=0.1):
+        """
+        Add random noise to input features to simulate chaotic conditions.
+        """
+        X_noisy = X.copy()
+        numeric_cols = X_noisy.select_dtypes(include=[np.number]).columns
+        for col in numeric_cols:
+            noise = np.random.normal(0, level, size=len(X_noisy))
+            X_noisy[col] = np.clip(X_noisy[col] + noise, 0, 1)  # keep normalized features valid
+        return X_noisy
 
-        results.append({
-            "noise_level" : nl,
-            "Precision change(%)" : change_rate,
-            "Noisy Accuracy": noisy_acc
-        })
+    def compute_chaos_score(self, X):
+        """
+        Compute a 'chaos score' based on variability of key features.
+        Higher = more chaotic environment.
+        """
+        if isinstance(X, pd.DataFrame):
+            variability = X.std(axis=1)
+        else:
+            variability = np.std(list(X.values()), axis=1)
+        return float(np.mean(variability))
 
-    return pd.DataFrame(results)
+    def analyze(self, X, y):
+        """
+        Evaluate how model performance changes with increasing chaos.
+        """
+        print_banner("CHAOS ANALYSIS STARTED")
+        chaos_levels = [0.0, 0.05, 0.1, 0.2, 0.4]
+        results = {}
+
+        for model_name, model in self.models.items():
+            print(f"\n🔍 Evaluating model: {model_name}")
+            perf_by_level = []
+            for chaos in chaos_levels:
+                X_chaotic = self.inject_chaos(X, level=chaos)
+                X_train, X_test, y_train, y_test = train_test_split(X_chaotic, y, test_size=0.2, random_state=42)
+                preds = model.predict(X_test)
+                acc = accuracy_score(y_test, preds)
+                perf_by_level.append({"chaos_level": chaos, "accuracy": acc})
+                print(f"Chaos={chaos:.2f} → Accuracy={acc:.4f}")
+
+            best_condition = max(perf_by_level, key=lambda x: x["accuracy"])
+            results[model_name] = {
+                "performance": perf_by_level,
+                "best_condition": best_condition
+            }
+
+        save_json_safe(self.results_path, results)
+        print_banner("CHAOS ANALYSIS COMPLETE ✅")
+        print(f"Results saved to: {self.results_path}\n")
+        return results
 
 
-def main():
-    ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    model_dir = os.path.join(ROOT, "models")
+# ---------------- DEMO EXECUTION ----------------
+if __name__ == "__main__":
+    ROOT = get_project_root()
     data_path = os.path.join(ROOT, "data", "processed", "cleaned_data.csv")
-    results_dir = os.path.join(ROOT, "results")
-    os.makedirs(results_dir, exist_ok=True)
-
-    # load data
-
     df = pd.read_csv(data_path)
     df = add_engineered_features(df)
 
-    features = ["x_norm", "y_norm", "team_encoded", "move_dist", "dist_to_goal",
-                "possession_streak", "prev_event_enc", "rolling_entropy"]
+    features = [
+        "x_norm", "y_norm", "team_encoded", "move_dist", "dist_to_goal",
+        "possession_streak", "prev_event_enc", "rolling_entropy"
+    ]
     target = "event_encoded"
 
     X = df[features]
     y = df[target]
 
-    models = {
-        "randomforest": os.path.join(model_dir, "randomforest.joblib"),
-        "gradientboosting": os.path.join(model_dir, "gradientboosting.joblib"),
-        "xgboost": os.path.join(model_dir, "xgboost.joblib"),
-        "stack": os.path.join(model_dir, "stack.joblib")
-    }
-
-    summary = []
-    for name, path in models.items():
-        if not os.path.exists(path):
-            print(f"⚠️ Model file not found: {path}")
-            continue
-
-        model = joblib.load(path)
-        chaos_df = eval_chaos_stability(model, X, y)
-        chaos_df["model"] = name
-        summary.append(chaos_df)
-
-        # Save individual model results
-        chaos_df.to_csv(os.path.join(results_dir, f"chaos_{name}.csv"), index=False)
-        print(f"\n📊 Chaos results for {name}:")
-        print(chaos_df)
-
-    if summary:
-        final_df = pd.concat(summary, ignore_index=True)
-        final_df.to_csv(os.path.join(results_dir, "chaos_summary.csv"), index=False)
-
-        print("\n✅ Chaos Analysis Complete. Summary saved to results/chaos_summary.csv")
-
-        # Compute and show mean change per model
-        chaos_summary = (
-            final_df.groupby("model")["Precision change(%)"]
-            .mean()
-            .reset_index()
-            .rename(columns={"Precision change(%)": "Avg Prediction Change (%)"})
-        )
-
-        print("\n📈 Average Stability per Model:")
-        print(chaos_summary)
-    else:
-        print("No chaos results generated — check model paths.")
-
-
-
-if __name__ == "__main__":
-    main()
+    analyzer = ChaosAnalyzer()
+    analyzer.analyze(X, y)
 
 
 
