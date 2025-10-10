@@ -10,40 +10,43 @@ from src.adaptive_controller import AdaptiveController
 def run_adaptive_demo():
     print_banner("Adaptive Model Demo (Real Dataset Simulation) !")
     ROOT = get_project_root()
-    data_path = os.path.join(ROOT, "data","processed","cleaned_data.csv")
+    data_path = os.path.join(ROOT, "data", "processed", "cleaned_data.csv")
     model_dir = os.path.join(ROOT, "models")
     results_dir = os.path.join(ROOT, "results")
     ensure_dir(results_dir)
 
     df = pd.read_csv(data_path)
+
     # --- Add engineered features if possible ---
     try:
         df = add_engineered_features(df)
     except Exception as e:
         print(f"⚠️ Could not add engineered features: {e}")
 
-# --- Option 1: Fill missing columns ---
+    # --- Ensure all required columns exist ---
     required_features = [
-    "x_norm", "y_norm", "team_encoded", "move_dist", "dist_to_goal",
-    "possession_streak", "prev_event_enc", "rolling_entropy"
-]
+        "x_norm", "y_norm", "team_encoded", "move_dist", "dist_to_goal",
+        "possession_streak", "prev_event_enc", "rolling_entropy"
+    ]
 
     for col in required_features:
         if col not in df.columns:
             print(f"⚠️ Missing column '{col}' added with default value 0")
             df[col] = 0
 
-# --- Now select features safely ---
-    X = df[required_features]
-    y = df["event_encoded"]
+    # --- Add missing move_dist_norm dynamically ---
+    if "move_dist_norm" not in df.columns and "move_dist" in df.columns:
+        df["move_dist_norm"] = df["move_dist"] / df["move_dist"].max()
+        print("⚡ Added missing 'move_dist_norm' column dynamically")
 
+    # --- Final feature list to match trained models ---
     feature_cols = [
-    "x_norm", "y_norm", "team_encoded", "move_dist", "dist_to_goal",
-    "possession_streak", "prev_event_enc", "rolling_entropy"
-]
+        "x_norm", "y_norm", "team_encoded", "move_dist", "move_dist_norm",
+        "dist_to_goal", "possession_streak", "prev_event_enc", "rolling_entropy"
+    ]
     target = "event_encoded"
 
-# --- Validate columns ---
+    # --- Validate columns ---
     missing_cols = [col for col in feature_cols if col not in df.columns]
     if missing_cols:
         print(f"⚠️ Missing columns in dataset: {missing_cols}")
@@ -56,20 +59,18 @@ def run_adaptive_demo():
     if not feature_cols:
         raise ValueError("❌ No valid feature columns found in dataset!")
 
-# --- Build input matrices safely ---
+    # --- Build input matrices ---
     X = df[feature_cols]
     y = df[target]
     print(f"✅ Using {len(feature_cols)} features: {feature_cols}")
 
-    # Intitialize compponents
-
+    # --- Initialize components ---
     analyzer = ChaosAnalyzer(models_dir=model_dir)
     controller = AdaptiveController(chaos_reference_path=os.path.join(results_dir, "chaos_analysis.json"))
 
-    print(f"Components ready : ChaosAnalyzer + AdapotiveController")
+    print("Components ready : ChaosAnalyzer + AdaptiveController")
 
-    # --  Run the loop -- 
-
+    # --- Run adaptive prediction loop ---
     records = []
     for i, row in X.iterrows():
         x_row = row.to_frame().T
@@ -82,6 +83,7 @@ def run_adaptive_demo():
         if model is None:
             continue
 
+        # --- Predict with XGBoost safely ---
         prediction = model.predict(x_row)[0]
         true_value = y.iloc[i]
 
@@ -96,13 +98,13 @@ def run_adaptive_demo():
         if i % 100 == 0:
             print(f"[{i}/{len(X)}] Chaos={chaos_score:.3f} → {selected_model_name} → pred={prediction}")
 
-    # --- Convert to DataFrame ---
+    # --- Save results ---
     results_df = pd.DataFrame(records)
     results_csv = os.path.join(results_dir, "adaptive_demo.csv")
     results_df.to_csv(results_csv, index=False)
     print(f"\n✅ Results saved: {results_csv}")
 
-    # --- Calculate summary stats ---
+    # --- Summary statistics ---
     accuracy = (results_df["predicted"] == results_df["actual"]).mean()
     model_usage = results_df["selected_model"].value_counts(normalize=True) * 100
 
